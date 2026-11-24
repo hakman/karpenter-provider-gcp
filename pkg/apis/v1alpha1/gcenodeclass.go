@@ -166,8 +166,7 @@ type GCENodeClassSpec struct {
 	// +optional
 	AutoGPUTaint bool `json:"autoGPUTaint,omitempty"`
 	// StartupScript is written verbatim to the instance's "startup-script" metadata key and
-	// owns node bootstrap end to end. Only valid with PROVISION_MODE=self-hosted. Do not embed
-	// secrets: any process on the node can read instance metadata; fetch secrets by reference at boot.
+	// owns node bootstrap end to end. Only valid with PROVISION_MODE=self-hosted.
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=131072
 	// +optional

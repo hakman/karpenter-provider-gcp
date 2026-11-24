@@ -845,8 +845,7 @@ spec:
               startupScript:
                 description: |-
                   StartupScript is written verbatim to the instance's "startup-script" metadata key and
-                  owns node bootstrap end to end. Only valid with PROVISION_MODE=self-hosted. Do not embed
-                  secrets: any process on the node can read instance metadata; fetch secrets by reference at boot.
+                  owns node bootstrap end to end. Only valid with PROVISION_MODE=self-hosted.
                 maxLength: 131072
                 minLength: 1
                 type: string
