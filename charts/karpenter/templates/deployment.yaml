@@ -137,7 +137,7 @@ spec:
               value: "{{ . }}"
             {{- end }}
             - name: PROVISION_MODE
-              value: "{{ .Values.controller.settings.provisionMode }}"
+              value: "{{ .Values.controller.settings.provisionMode | default "gke" }}"
             {{- with .Values.controller.settings.quotaExceededTTL }}
             - name: QUOTA_EXCEEDED_TTL
               value: "{{ . }}"
