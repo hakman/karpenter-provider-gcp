@@ -70,7 +70,10 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		// can cause races due to the fact that it fully replaces the list on a change
 		// Here, we are updating the finalizer list
 		if err := c.kubeClient.Patch(ctx, nodeClass, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
-			return reconcile.Result{}, err
+			if errors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil //nolint:staticcheck // Rate-limited requeue avoids logging expected optimistic-lock conflicts as errors.
+			}
+			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
 	}
 	stored := nodeClass.DeepCopy()
@@ -93,7 +96,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		// Here, we are updating the status condition list
 		if err := c.kubeClient.Status().Patch(ctx, nodeClass, client.MergeFromWithOptions(stored, client.MergeFromWithOptimisticLock{})); err != nil {
 			if errors.IsConflict(err) {
-				return reconcile.Result{}, err
+				return reconcile.Result{Requeue: true}, nil //nolint:staticcheck // Rate-limited requeue avoids logging expected optimistic-lock conflicts as errors.
 			}
 			errs = multierr.Append(errs, client.IgnoreNotFound(err))
 		}
