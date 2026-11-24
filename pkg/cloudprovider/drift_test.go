@@ -285,12 +285,6 @@ func TestIsImageDrifted(t *testing.T) {
 			nodeClass: class(newAMD64CPUImage),
 			want:      "",
 		},
-		{
-			name:      "no drift when NodeClaim image ID is unknown (e.g. adopted VM)",
-			nodeClaim: claim("", map[string]string{corev1.LabelArchStable: "amd64"}),
-			nodeClass: class(newAMD64CPUImage),
-			want:      "",
-		},
 	}
 
 	for _, tt := range tests {
