@@ -31,6 +31,7 @@ import (
 	containerv1 "google.golang.org/api/container/v1"
 
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
 )
 
 // stubGKEProvider satisfies gke.Provider for unit tests.
@@ -45,6 +46,29 @@ func (s *stubGKEProvider) GetClusterConfig(_ context.Context) (*containerv1.Clus
 }
 func (s *stubGKEProvider) GetServerConfig(_ context.Context) (*containerv1.ServerConfig, error) {
 	return s.serverConfig, nil
+}
+
+// failingGKEProvider satisfies gke.Provider and fails the test on any call — used to
+// prove a code path never reaches the GKE provider.
+type failingGKEProvider struct{ t *testing.T }
+
+func (f *failingGKEProvider) ResolveClusterZones(_ context.Context) ([]string, error) {
+	f.t.Error("ResolveClusterZones must not be called")
+	return nil, nil
+}
+
+func (f *failingGKEProvider) GetClusterConfig(_ context.Context) (*containerv1.Cluster, error) {
+	f.t.Error("GetClusterConfig must not be called")
+	return nil, nil
+}
+
+func (f *failingGKEProvider) InvalidateClusterConfig() {
+	f.t.Error("InvalidateClusterConfig must not be called")
+}
+
+func (f *failingGKEProvider) GetServerConfig(_ context.Context) (*containerv1.ServerConfig, error) {
+	f.t.Error("GetServerConfig must not be called")
+	return nil, nil
 }
 
 func readyTestImages(images []*compute.Image) []*compute.Image {
@@ -366,6 +390,62 @@ func TestCOSExactSelectorsWithoutUsableImagesAreUnavailable(t *testing.T) {
 			require.Empty(t, images)
 		})
 	}
+}
+
+func TestList_SelfHostedRejectsNonIDTerms(t *testing.T) {
+	testCases := []struct {
+		name string
+		term v1alpha1.ImageSelectorTerm
+	}{
+		{name: "alias term", term: v1alpha1.ImageSelectorTerm{Alias: "ContainerOptimizedOS@latest"}}, //nolint:staticcheck // Verify deprecated alias terms are also rejected in self-hosted mode.
+		{name: "family with version", term: v1alpha1.ImageSelectorTerm{Family: v1alpha1.ImageFamilyContainerOptimizedOS, Version: "latest"}},
+		{name: "family with channel", term: v1alpha1.ImageSelectorTerm{Family: v1alpha1.ImageFamilyContainerOptimizedOS, Channel: v1alpha1.ImageChannelStable}},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := NewDefaultProvider(nil, &fakeVersionProvider{version: "v1.34.7"}, &failingGKEProvider{t: t})
+			ctx := options.ToContext(context.Background(), &options.Options{
+				ProvisionMode: options.ProvisionModeSelfHosted,
+			})
+			nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+				ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{tc.term},
+			}}
+
+			_, err := p.List(ctx, nc)
+			require.Error(t, err)
+			require.True(t, IsImageResolutionError(err), "expected a terminal image resolution error")
+			require.Contains(t, err.Error(), "only id: imageSelectorTerms are supported in self-hosted mode")
+		})
+	}
+}
+
+func TestList_SelfHostedResolvesIDWithoutVersionOrGKECalls(t *testing.T) {
+	catalog := &imageCatalog{
+		pages: [][]*compute.Image{{
+			{Name: "custom-kops-image", Architecture: OSArchitectureX86, Status: "READY"},
+		}},
+	}
+	srv := imageCatalogServer(t, catalog)
+	t.Cleanup(srv.Close)
+
+	// Both versionProvider (nil) and gkeProvider (failing) must remain untouched.
+	p := NewDefaultProvider(buildComputeService(t, srv), nil, &failingGKEProvider{t: t})
+	ctx := options.ToContext(context.Background(), &options.Options{
+		ProvisionMode: options.ProvisionModeSelfHosted,
+	})
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{
+			{ID: "projects/my-project/global/images/custom-kops-image"},
+		},
+	}}
+
+	imgs, err := p.List(ctx, nc)
+	require.NoError(t, err)
+	require.Len(t, imgs, 1)
+	require.Equal(t, "projects/my-project/global/images/custom-kops-image", imgs[0].SourceImage)
+	require.Empty(t, imgs[0].KubernetesVersion)
+	require.Equal(t, OSArchAMD64Requirement, imgs[0].Requirements.Get("kubernetes.io/arch").Any())
 }
 
 func TestDispatch_ChannelCluster_UnspecifiedCluster_ReturnsError(t *testing.T) {

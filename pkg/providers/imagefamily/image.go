@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/gke"
 	versionprovider "github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/version"
 )
@@ -104,6 +105,18 @@ func NewDefaultProvider(computeService *compute.Service, versionProvider version
 
 // List caches non-empty successful resolutions per selector; failures and empty results retry.
 func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (Images, error) {
+	// Self-hosted mode accepts only explicit image IDs; other terms need GKE resolution
+	// and are terminal configuration errors. Gate before the cache so no GKE call is
+	// made and no cached result bypasses the restriction.
+	selfHosted := options.FromContext(ctx).IsSelfHosted()
+	if selfHosted {
+		for _, term := range nodeClass.Spec.ImageSelectorTerms {
+			if term.ID == "" {
+				return nil, &imageResolutionError{msg: "only id: imageSelectorTerms are supported in self-hosted mode"}
+			}
+		}
+	}
+
 	p.Lock()
 	defer p.Unlock()
 
@@ -123,9 +136,13 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 		if err != nil {
 			return nil, err
 		}
-		masterVersion, err = p.setBootstrapVersions(ctx, imgs, masterVersion)
-		if err != nil {
-			return nil, err
+		// Self-hosted nodes never fetch GKE bootstrap bundles, so skip release decoding
+		// and API-server version lookups.
+		if !selfHosted {
+			masterVersion, err = p.setBootstrapVersions(ctx, imgs, masterVersion)
+			if err != nil {
+				return nil, err
+			}
 		}
 		result = append(result, imgs...)
 	}
