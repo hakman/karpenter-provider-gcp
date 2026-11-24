@@ -30,7 +30,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"cloud.google.com/go/compute/apiv1/computepb"
@@ -112,9 +111,6 @@ type DefaultProvider struct {
 
 	// In current implementation, instanceID == InstanceName
 	instanceCache *cache.Cache
-	// subnetworkNetworks caches canonical subnetwork ref -> network URL (self-hosted
-	// mode); the mapping is effectively immutable.
-	subnetworkNetworks sync.Map
 
 	clusterName           string
 	clusterLocation       string
@@ -409,7 +405,7 @@ func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceNa
 		}
 		return nil, false, fmt.Errorf("failed to get instance: %w", err)
 	}
-	if p.clusterName != "" && !metadata.HasValue(instance.Metadata, metadata.ClusterNameKey, p.clusterName) {
+	if !p.ownsComputeInstance(instance) {
 		return nil, false, nil
 	}
 	return instance, true, nil
@@ -427,7 +423,7 @@ func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim
 				continue
 			}
 			for _, i := range items.Instances {
-				if p.clusterName != "" && !metadata.HasValue(i.Metadata, metadata.ClusterNameKey, p.clusterName) {
+				if !p.ownsComputeInstance(i) {
 					continue
 				}
 				instance = i
@@ -440,6 +436,16 @@ func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim
 		return nil, err
 	}
 	return instance, nil
+}
+
+// ownsComputeInstance reports whether inst belongs to this cluster: its
+// cluster-name metadata must equal clusterName (when set) and any stamped
+// cluster-location label must match clusterLocation.
+func (p *DefaultProvider) ownsComputeInstance(inst *compute.Instance) bool {
+	if p.clusterName != "" && !metadata.HasValue(inst.Metadata, metadata.ClusterNameKey, p.clusterName) {
+		return false
+	}
+	return p.matchesClusterLocation(inst.Labels)
 }
 
 func lastPathSegment(value string) string {
@@ -1109,7 +1115,7 @@ func (p *DefaultProvider) buildInstance(ctx context.Context, nodeClaim *karpv1.N
 			metadata.CustomMetadata(nodeClass.Spec.Metadata),
 		)
 		instanceLabels = initializeInstanceLabels(nodeClass)
-		networkInterfaces, err = p.setupSelfHostedNetworkInterfaces(ctx, nodeClass, podRange)
+		networkInterfaces, err = p.setupSelfHostedNetworkInterfaces(nodeClass, podRange)
 		if err != nil {
 			return nil, fmt.Errorf("setting up network interfaces: %w", err)
 		}
@@ -1746,7 +1752,11 @@ func clusterIDBase32(clusterID string) (string, bool) {
 // label as a server-side filter in syncInstances. Until then the fallback must stay to
 // avoid making pre-label instances invisible to Karpenter.
 func (p *DefaultProvider) belongsToCluster(inst *Instance) bool {
-	loc, ok := inst.Labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
+	return p.matchesClusterLocation(inst.Labels)
+}
+
+func (p *DefaultProvider) matchesClusterLocation(labels map[string]string) bool {
+	loc, ok := labels[utils.SanitizeGCELabelValue(utils.LabelClusterLocationKey)]
 	return !ok || loc == p.clusterLocation
 }
 

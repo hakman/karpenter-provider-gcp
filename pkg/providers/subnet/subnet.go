@@ -175,14 +175,15 @@ func resourceParts(raw string) ([]string, error) {
 	return parts, nil
 }
 
-// ParseSubnetworkRef parses a bare name, regional path, project-qualified path,
-// or full Compute URL into its project, region, and subnetwork name.
-func ParseSubnetworkRef(subnetwork, defaultProject, defaultRegion string) (project, region, name string, err error) {
-	ref, err := resolveTarget("", subnetwork, defaultProject, defaultRegion)
+// CanonicalSubnetworkRef normalizes a bare name, regional path, project-qualified
+// path, or full Compute URL to projects/{project}/regions/{region}/subnetworks/{name}.
+// When network is non-empty, its project is used for relative subnetwork refs.
+func CanonicalSubnetworkRef(network, subnetwork, defaultProject, defaultRegion string) (string, error) {
+	ref, err := resolveTarget(network, subnetwork, defaultProject, defaultRegion)
 	if err != nil {
-		return "", "", "", err
+		return "", err
 	}
-	return ref.project, ref.region, ref.name, nil
+	return ref.String(), nil
 }
 
 func resolveTarget(network, subnetwork, defaultProject, region string) (subnetworkRef, error) {

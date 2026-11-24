@@ -277,6 +277,11 @@ func TestSanitizeGCELabelValue(t *testing.T) {
 			expected: "my-cluster",
 		},
 		{
+			name:     "valid GKE name with consecutive hyphens preserved verbatim",
+			input:    "prod--east",
+			expected: "prod--east",
+		},
+		{
 			name:     "FQDN cluster name maps dots to dashes",
 			input:    "poc0006.k8s.local",
 			expected: "poc0006-k8s-local",
@@ -292,9 +297,9 @@ func TestSanitizeGCELabelValue(t *testing.T) {
 			expected: "my-cluster",
 		},
 		{
-			name:     "value longer than 63 characters is truncated",
+			name:     "value longer than 63 characters is truncated without trailing dash",
 			input:    strings.Repeat("a", 62) + ".example.com",
-			expected: strings.Repeat("a", 62) + "-",
+			expected: strings.Repeat("a", 62),
 		},
 		{
 			name:     "only separators sanitizes to empty",

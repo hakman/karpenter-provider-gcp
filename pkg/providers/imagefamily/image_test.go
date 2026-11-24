@@ -392,6 +392,12 @@ func TestCOSExactSelectorsWithoutUsableImagesAreUnavailable(t *testing.T) {
 	}
 }
 
+func selfHostedImageContext() context.Context {
+	return options.ToContext(context.Background(), &options.Options{
+		ProvisionMode: options.ProvisionModeSelfHosted,
+	})
+}
+
 func TestList_SelfHostedRejectsNonIDTerms(t *testing.T) {
 	testCases := []struct {
 		name string
@@ -405,14 +411,11 @@ func TestList_SelfHostedRejectsNonIDTerms(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			p := NewDefaultProvider(nil, &fakeVersionProvider{version: "v1.34.7"}, &failingGKEProvider{t: t})
-			ctx := options.ToContext(context.Background(), &options.Options{
-				ProvisionMode: options.ProvisionModeSelfHosted,
-			})
 			nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
 				ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{tc.term},
 			}}
 
-			_, err := p.List(ctx, nc)
+			_, err := p.List(selfHostedImageContext(), nc)
 			require.Error(t, err)
 			require.True(t, IsImageResolutionError(err), "expected a terminal image resolution error")
 			require.Contains(t, err.Error(), "only id: imageSelectorTerms are supported in self-hosted mode")
@@ -431,16 +434,13 @@ func TestList_SelfHostedResolvesIDWithoutVersionOrGKECalls(t *testing.T) {
 
 	// Both versionProvider (nil) and gkeProvider (failing) must remain untouched.
 	p := NewDefaultProvider(buildComputeService(t, srv), nil, &failingGKEProvider{t: t})
-	ctx := options.ToContext(context.Background(), &options.Options{
-		ProvisionMode: options.ProvisionModeSelfHosted,
-	})
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
 		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{
 			{ID: "projects/my-project/global/images/custom-kops-image"},
 		},
 	}}
 
-	imgs, err := p.List(ctx, nc)
+	imgs, err := p.List(selfHostedImageContext(), nc)
 	require.NoError(t, err)
 	require.Len(t, imgs, 1)
 	require.Equal(t, "projects/my-project/global/images/custom-kops-image", imgs[0].SourceImage)
@@ -459,9 +459,6 @@ func TestList_SelfHostedFullURLAndLegacyUnspecifiedArch(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	p := NewDefaultProvider(buildComputeService(t, srv), nil, &failingGKEProvider{t: t})
-	ctx := options.ToContext(context.Background(), &options.Options{
-		ProvisionMode: options.ProvisionModeSelfHosted,
-	})
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
 		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{
 			{ID: "https://www.googleapis.com/compute/v1/projects/my-project/global/images/legacy-image"},
@@ -469,11 +466,66 @@ func TestList_SelfHostedFullURLAndLegacyUnspecifiedArch(t *testing.T) {
 		},
 	}}
 
-	imgs, err := p.List(ctx, nc)
+	imgs, err := p.List(selfHostedImageContext(), nc)
 	require.NoError(t, err)
-	require.Len(t, imgs, 2)
+	require.Equal(t, []string{
+		"projects/my-project/global/images/legacy-image",
+		"projects/my-project/global/images/unspecified-arch-image",
+	}, imageSources(imgs), "full image URLs must be canonicalized to project-relative paths to prevent false ImageDrift")
 	for _, img := range imgs {
 		require.Equal(t, OSArchAMD64Requirement, img.Requirements.Get("kubernetes.io/arch").Any())
+	}
+}
+
+func TestParseImageSource(t *testing.T) {
+	testCases := []struct {
+		name        string
+		input       string
+		wantProject string
+		wantImage   string
+		wantErr     bool
+	}{
+		{
+			name:        "project-relative path",
+			input:       "projects/my-proj/global/images/img-1",
+			wantProject: "my-proj",
+			wantImage:   "img-1",
+		},
+		{
+			name:        "www.googleapis.com full URL",
+			input:       "https://www.googleapis.com/compute/v1/projects/my-proj/global/images/img-1",
+			wantProject: "my-proj",
+			wantImage:   "img-1",
+		},
+		{
+			name:        "compute.googleapis.com full URL with surrounding whitespace",
+			input:       "  https://compute.googleapis.com/compute/v1/projects/my-proj/global/images/img-1  ",
+			wantProject: "my-proj",
+			wantImage:   "img-1",
+		},
+		{
+			name:    "global path without project rejected",
+			input:   "global/images/img-1",
+			wantErr: true,
+		},
+		{
+			name:    "bare image name rejected",
+			input:   "img-1",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			project, image, err := parseImageSource(tc.input)
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.wantProject, project)
+			require.Equal(t, tc.wantImage, image)
+		})
 	}
 }
 

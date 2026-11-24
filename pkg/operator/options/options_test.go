@@ -61,6 +61,7 @@ func TestQuotaExceededTTL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			clearProvisionModeEnv(t)
 			t.Setenv(quotaExceededTTLEnvVarName, "")
 			if tt.env != nil {
 				t.Setenv(quotaExceededTTLEnvVarName, *tt.env)
@@ -100,6 +101,7 @@ func TestTelemetry(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			clearProvisionModeEnv(t)
 			t.Setenv(telemetryEnvVarName, "")
 			if tt.env != nil {
 				t.Setenv(telemetryEnvVarName, *tt.env)
@@ -147,6 +149,7 @@ func TestCapacityBackoffDurations(t *testing.T) {
 		}
 		for _, tt := range tests {
 			t.Run(s.flag+"/"+tt.name, func(t *testing.T) {
+				clearProvisionModeEnv(t)
 				t.Setenv(s.env, "")
 				if tt.env != nil {
 					t.Setenv(s.env, *tt.env)
@@ -170,22 +173,51 @@ func TestCapacityBackoffDurations(t *testing.T) {
 	}
 }
 
+func clearProvisionModeEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{
+		provisionModeEnvVarName,
+		defaultNodePoolTemplateNameEnvVarName,
+		nodeLocationEnvVarName,
+	} {
+		t.Setenv(name, "")
+		require.NoError(t, os.Unsetenv(name))
+	}
+}
+
 func TestParse_ProvisionModeSelection(t *testing.T) {
-	t.Parallel()
+	var nilOpts *Options
+	require.False(t, nilOpts.IsSelfHosted())
 
-	opts, err := parseOptions(t, requiredArgs()...)
-	require.NoError(t, err)
-	require.Equal(t, ProvisionModeGKE, opts.ProvisionMode)
-	require.False(t, opts.IsSelfHosted())
+	tests := []struct {
+		name           string
+		env            *string
+		args           []string
+		wantMode       string
+		wantSelfHosted bool
+	}{
+		{name: "unset defaults to gke", wantMode: ProvisionModeGKE, wantSelfHosted: false},
+		{name: "env selects self-hosted", env: ptr.To(ProvisionModeSelfHosted), wantMode: ProvisionModeSelfHosted, wantSelfHosted: true},
+		{name: "flag selects self-hosted", args: []string{"--provision-mode=self-hosted"}, wantMode: ProvisionModeSelfHosted, wantSelfHosted: true},
+		{name: "flag takes precedence over env", env: ptr.To(ProvisionModeSelfHosted), args: []string{"--provision-mode=gke"}, wantMode: ProvisionModeGKE, wantSelfHosted: false},
+	}
 
-	opts, err = parseOptions(t, append(requiredArgs(), "--provision-mode=self-hosted")...)
-	require.NoError(t, err)
-	require.True(t, opts.IsSelfHosted())
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearProvisionModeEnv(t)
+			if tt.env != nil {
+				t.Setenv(provisionModeEnvVarName, *tt.env)
+			}
+
+			opts, err := parseOptions(t, append(requiredArgs(), tt.args...)...)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantMode, opts.ProvisionMode)
+			require.Equal(t, tt.wantSelfHosted, opts.IsSelfHosted())
+		})
+	}
 }
 
 func TestParse_Validation(t *testing.T) {
-	t.Parallel()
-
 	testCases := []struct {
 		name            string
 		args            []string
@@ -221,7 +253,7 @@ func TestParse_Validation(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+			clearProvisionModeEnv(t)
 
 			_, err := parseOptions(t, tc.args...)
 			if tc.wantErrContains == "" {
@@ -234,8 +266,6 @@ func TestParse_Validation(t *testing.T) {
 }
 
 func TestParse_ClusterLocationNormalization(t *testing.T) {
-	t.Parallel()
-
 	testCases := []struct {
 		name             string
 		provisionMode    string
@@ -270,7 +300,7 @@ func TestParse_ClusterLocationNormalization(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+			clearProvisionModeEnv(t)
 
 			opts, err := parseOptions(t,
 				"--project-id=my-project", "--cluster-name=my-cluster",
@@ -280,12 +310,4 @@ func TestParse_ClusterLocationNormalization(t *testing.T) {
 			require.Equal(t, tc.expectedLocation, opts.NodeLocation)
 		})
 	}
-}
-
-func TestIsSelfHosted_NilReceiverDefaultsToGKE(t *testing.T) {
-	t.Parallel()
-
-	var opts *Options
-
-	require.False(t, opts.IsSelfHosted())
 }

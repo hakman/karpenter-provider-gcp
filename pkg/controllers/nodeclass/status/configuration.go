@@ -39,18 +39,68 @@ func (c *Configuration) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENo
 		return reconcile.Result{}, nil
 	}
 
+	if msg := validateSelfHostedNodeClass(nodeClass); msg != "" {
+		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeConfigurationReady, invalidSelfHostedConfigReason, msg)
+		return reconcile.Result{}, nil
+	}
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeConfigurationReady)
+	return reconcile.Result{}, nil
+}
+
+func validateSelfHostedNodeClass(nodeClass *v1alpha1.GCENodeClass) string {
 	switch {
 	case nodeClass.Spec.NetworkConfig == nil || nodeClass.Spec.NetworkConfig.Subnetwork == "":
-		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeConfigurationReady, invalidSelfHostedConfigReason,
-			"spec.networkConfig.subnetwork is required in self-hosted mode")
-	case nodeClass.Spec.KubeletConfiguration == nil || nodeClass.Spec.KubeletConfiguration.MaxPods == nil || *nodeClass.Spec.KubeletConfiguration.MaxPods < 1:
-		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeConfigurationReady, invalidSelfHostedConfigReason,
-			"spec.kubeletConfiguration.maxPods must be set and >= 1 in self-hosted mode")
-	case !slices.ContainsFunc(nodeClass.Spec.Disks, func(d v1alpha1.Disk) bool { return d.Boot }):
-		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeConfigurationReady, invalidSelfHostedConfigReason,
-			"spec.disks must contain a boot disk in self-hosted mode")
+		return "spec.networkConfig.subnetwork is required in self-hosted mode"
+	case !hasValidMaxPods(nodeClass.Spec.KubeletConfiguration):
+		return "spec.kubeletConfiguration.maxPods must be set and >= 1 in self-hosted mode"
+	case !hasBootDisk(nodeClass.Spec.Disks):
+		return "spec.disks must contain a boot disk in self-hosted mode"
+	case nodeClass.Spec.AutoGPUTaint:
+		return "spec.autoGPUTaint is not supported in self-hosted mode"
+	case hasSecondaryBootDisk(nodeClass.Spec.Disks):
+		return "spec.disks[].secondaryBootImage and secondaryBootMode are not supported in self-hosted mode"
+	case hasUnsupportedSelfHostedKubeletConfig(nodeClass.Spec.KubeletConfiguration):
+		return "spec.kubeletConfiguration only supports binpacking fields (maxPods, podsPerCore, systemReserved, kubeReserved, evictionHard) in self-hosted mode"
 	default:
-		nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeConfigurationReady)
+		return ""
 	}
-	return reconcile.Result{}, nil
+}
+
+func hasValidMaxPods(kc *v1alpha1.KubeletConfiguration) bool {
+	return kc != nil && kc.MaxPods != nil && *kc.MaxPods >= 1
+}
+
+func hasBootDisk(disks []v1alpha1.Disk) bool {
+	return slices.ContainsFunc(disks, func(d v1alpha1.Disk) bool { return d.Boot })
+}
+
+func hasSecondaryBootDisk(disks []v1alpha1.Disk) bool {
+	return slices.ContainsFunc(disks, func(d v1alpha1.Disk) bool {
+		return d.SecondaryBootImage != "" || d.SecondaryBootMode != ""
+	})
+}
+
+// hasUnsupportedSelfHostedKubeletConfig mirrors the startupScript CEL rule for
+// image-baked self-hosted GCENodeClasses: any kubeletConfiguration field outside
+// the binpacking allowlist is delivered only via GKE kubelet-config metadata.
+func hasUnsupportedSelfHostedKubeletConfig(kc *v1alpha1.KubeletConfiguration) bool {
+	if kc == nil {
+		return false
+	}
+	return slices.Contains([]bool{
+		len(kc.ClusterDNS) > 0,
+		len(kc.EvictionSoft) > 0,
+		len(kc.EvictionSoftGracePeriod) > 0,
+		kc.EvictionMaxPodGracePeriod != nil,
+		kc.ImageGCHighThresholdPercent != nil,
+		kc.ImageGCLowThresholdPercent != nil,
+		kc.CPUCFSQuota != nil,
+		kc.CPUManagerPolicy != "",
+		kc.SerializeImagePulls != nil,
+		kc.MaxParallelImagePulls != nil,
+		kc.FailSwapOn != nil,
+		kc.MemorySwap != nil,
+		kc.ShutdownGracePeriod != nil,
+		kc.ShutdownGracePeriodCriticalPods != nil,
+	}, true)
 }

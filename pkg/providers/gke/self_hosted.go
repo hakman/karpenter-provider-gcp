@@ -19,10 +19,13 @@ package gke
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/patrickmn/go-cache"
 	"google.golang.org/api/compute/v1"
 	containerv1 "google.golang.org/api/container/v1"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // SelfHostedProvider is the Provider for self-hosted (non-GKE) clusters: backed only by
@@ -50,10 +53,25 @@ func (p *SelfHostedProvider) ResolveClusterZones(ctx context.Context) ([]string,
 		return zone.([]string), nil
 	}
 
-	zones, err := listZoneNamesInRegion(ctx, p.computeService, p.projectID, p.region, true)
+	var zones []string
+	prefix := p.region + "-"
+	err := p.computeService.Zones.List(p.projectID).Pages(ctx, func(page *compute.ZoneList) error {
+		for _, z := range page.Items {
+			if strings.HasPrefix(z.Name, prefix) && z.Status == "UP" {
+				zones = append(zones, z.Name)
+			}
+		}
+		return nil
+	})
 	if err != nil {
+		log.FromContext(ctx).Error(err, "error listing zones from GCP")
 		return nil, err
 	}
+	if len(zones) == 0 {
+		return nil, fmt.Errorf("no zones found for region: %s", p.region)
+	}
+
+	sort.Strings(zones)
 	p.zoneCache.Set(zoneCacheKey, zones, cache.DefaultExpiration)
 	return zones, nil
 }

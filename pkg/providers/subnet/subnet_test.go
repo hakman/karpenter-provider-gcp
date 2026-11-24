@@ -211,3 +211,72 @@ func TestResolveTargetWithoutNetworkUsesDefaultProject(t *testing.T) {
 	require.Equal(t, "europe-west4", requests[len(requests)-1].GetRegion())
 	require.Equal(t, "shared", requests[len(requests)-1].GetSubnetwork())
 }
+
+func TestCanonicalSubnetworkRef(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name       string
+		network    string
+		subnetwork string
+		want       string
+		expectErr  bool
+	}{
+		{
+			name:       "bare name uses defaults",
+			subnetwork: "nodes",
+			want:       "projects/default-project/regions/us-central1/subnetworks/nodes",
+		},
+		{
+			name:       "bare name inherits host project from explicit network",
+			network:    "projects/host-project/global/networks/shared-vpc",
+			subnetwork: "nodes",
+			want:       "projects/host-project/regions/us-central1/subnetworks/nodes",
+		},
+		{
+			name:       "regional path uses default project",
+			subnetwork: "regions/europe-west4/subnetworks/nodes",
+			want:       "projects/default-project/regions/europe-west4/subnetworks/nodes",
+		},
+		{
+			name:       "regional path inherits host project from explicit network",
+			network:    "projects/host-project/global/networks/shared-vpc",
+			subnetwork: "regions/europe-west4/subnetworks/nodes",
+			want:       "projects/host-project/regions/europe-west4/subnetworks/nodes",
+		},
+		{
+			name:       "project-qualified path overrides explicit network project",
+			network:    "projects/host-project/global/networks/shared-vpc",
+			subnetwork: "projects/other/regions/europe-west4/subnetworks/nodes",
+			want:       "projects/other/regions/europe-west4/subnetworks/nodes",
+		},
+		{
+			name:       "full URL",
+			subnetwork: "https://www.googleapis.com/compute/v1/projects/other/regions/europe-west4/subnetworks/nodes",
+			want:       "projects/other/regions/europe-west4/subnetworks/nodes",
+		},
+		{
+			name:       "path without subnetworks segment rejected",
+			subnetwork: "projects/other/global/networks/my-vpc",
+			expectErr:  true,
+		},
+		{
+			name:       "unqualified subnetworks path rejected",
+			subnetwork: "subnetworks/nodes",
+			expectErr:  true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := subnet.CanonicalSubnetworkRef(tc.network, tc.subnetwork, "default-project", "us-central1")
+			if tc.expectErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}

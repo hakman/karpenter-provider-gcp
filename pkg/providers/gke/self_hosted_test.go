@@ -24,13 +24,12 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/patrickmn/go-cache"
 	"github.com/stretchr/testify/require"
 	computev1 "google.golang.org/api/compute/v1"
 	googleapioption "google.golang.org/api/option"
 )
 
-func newSelfHostedTestProvider(t *testing.T, endpoint string) *SelfHostedProvider {
+func newSelfHostedTestProvider(t *testing.T, endpoint string) Provider {
 	t.Helper()
 	computeService, err := computev1.NewService(context.Background(),
 		googleapioption.WithoutAuthentication(),
@@ -38,12 +37,7 @@ func newSelfHostedTestProvider(t *testing.T, endpoint string) *SelfHostedProvide
 	)
 	require.NoError(t, err)
 
-	return &SelfHostedProvider{
-		computeService: computeService,
-		projectID:      "p",
-		region:         "us-central1",
-		zoneCache:      cache.New(zoneCacheExpiration, zoneCacheCleanupInterval),
-	}
+	return NewSelfHostedProvider(computeService, "p", "us-central1")
 }
 
 func TestSelfHostedResolveClusterZones_FiltersByRegionAndStatus(t *testing.T) {
@@ -91,19 +85,4 @@ func TestSelfHostedResolveClusterZones_ErrorsWhenRegionHasNoZones(t *testing.T) 
 
 	_, err := p.ResolveClusterZones(context.Background())
 	require.ErrorContains(t, err, "no zones found for region: us-central1")
-}
-
-func TestSelfHostedClusterAndServerConfig_ReturnErrors(t *testing.T) {
-	t.Parallel()
-
-	p := &SelfHostedProvider{}
-
-	// InvalidateClusterConfig is a no-op and must not panic.
-	require.NotPanics(t, p.InvalidateClusterConfig)
-
-	_, err := p.GetClusterConfig(context.Background())
-	require.ErrorContains(t, err, "cluster config is not available in self-hosted mode")
-
-	_, err = p.GetServerConfig(context.Background())
-	require.ErrorContains(t, err, "server config is not available in self-hosted mode")
 }

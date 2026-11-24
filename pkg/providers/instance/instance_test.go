@@ -2836,11 +2836,13 @@ func TestSyncInstances_AdmitsOnlyExactClusterNameMetadata(t *testing.T) {
 		}
 	}
 
+	var gotFilter string
 	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/projects/test-project/regions/us-central1"):
 			writeJSON(w, &compute.Region{Zones: []string{"projects/test-project/zones/us-central1-a"}})
 		case strings.HasSuffix(r.URL.Path, "/projects/test-project/zones/us-central1-a/instances"):
+			gotFilter = r.URL.Query().Get("filter")
 			writeJSON(w, &compute.InstanceList{Items: []*compute.Instance{
 				gceInstance("exact-match", clusterNameMetadata("a-b.com")),
 				gceInstance("sanitized-collision", clusterNameMetadata("a.b.com")),
@@ -2855,10 +2857,17 @@ func TestSyncInstances_AdmitsOnlyExactClusterNameMetadata(t *testing.T) {
 	p.clusterName = "a-b.com"
 
 	require.NoError(t, p.syncInstances(context.Background()))
+	require.Contains(t, gotFilter, "labels.goog-k8s-cluster-name:a-b-com")
 
 	require.Equal(t, 1, p.instanceCache.ItemCount())
 	_, ok := p.instanceCache.Get("exact-match")
 	require.True(t, ok)
+
+	// Upgrade compatibility: valid GKE cluster names with consecutive hyphens
+	// must query the verbatim label rather than collapsing "--" to "-".
+	p.clusterName = "prod--east"
+	require.NoError(t, p.syncInstances(context.Background()))
+	require.Contains(t, gotFilter, "labels.goog-k8s-cluster-name:prod--east")
 }
 
 func TestBuildInstanceTags(t *testing.T) {

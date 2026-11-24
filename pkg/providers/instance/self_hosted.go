@@ -17,7 +17,6 @@ limitations under the License.
 package instance
 
 import (
-	"context"
 	"fmt"
 
 	"google.golang.org/api/compute/v1"
@@ -30,21 +29,17 @@ import (
 // NodeClass startup script or baked into the image, so the instance carries no GKE
 // bootstrap metadata, tags, or labels.
 
-// setupSelfHostedNetworkInterfaces builds NICs from spec.networkConfig: the primary
-// subnetwork is required and each interface's network is derived via the Compute API.
-// Nodes are private by default; alias IP ranges use podRange (resolved from
-// spec.subnetRangeNames or deprecated spec.subnetRangeName) since there is no cluster
-// IP allocation policy to fall back to.
-func (p *DefaultProvider) setupSelfHostedNetworkInterfaces(ctx context.Context, nodeClass *v1alpha1.GCENodeClass, podRange string) ([]*compute.NetworkInterface, error) {
+// setupSelfHostedNetworkInterfaces builds NICs from spec.networkConfig. The primary
+// subnetwork is required; Network is omitted unless explicitly set on an additional
+// interface so GCE infers the VPC from the subnetwork. Nodes are private by default;
+// alias IP ranges use podRange (resolved from spec.subnetRangeNames or deprecated
+// spec.subnetRangeName) since there is no GKE IP allocation policy.
+func (p *DefaultProvider) setupSelfHostedNetworkInterfaces(nodeClass *v1alpha1.GCENodeClass, podRange string) ([]*compute.NetworkInterface, error) {
 	cfg := nodeClass.Spec.NetworkConfig
 	if cfg == nil || cfg.Subnetwork == "" {
 		return nil, fmt.Errorf("GCENodeClass %s: spec.networkConfig.subnetwork is required in self-hosted mode", nodeClass.Name)
 	}
-	project, region, name, err := subnet.ParseSubnetworkRef(cfg.Subnetwork, p.projectID, p.region)
-	if err != nil {
-		return nil, err
-	}
-	network, err := p.networkForSubnetwork(ctx, project, region, name)
+	primarySubnetwork, err := subnet.CanonicalSubnetworkRef("", cfg.Subnetwork, p.projectID, p.region)
 	if err != nil {
 		return nil, err
 	}
@@ -53,8 +48,7 @@ func (p *DefaultProvider) setupSelfHostedNetworkInterfaces(ctx context.Context, 
 	nic := networkInterfaceType(nodeClass)
 
 	primary := &compute.NetworkInterface{
-		Network:    network,
-		Subnetwork: canonicalSubnetworkRef(project, region, name),
+		Subnetwork: primarySubnetwork,
 		NicType:    nic,
 	}
 	if podRange != "" {
@@ -67,45 +61,17 @@ func (p *DefaultProvider) setupSelfHostedNetworkInterfaces(ctx context.Context, 
 
 	ifaces := []*compute.NetworkInterface{primary}
 	for _, override := range cfg.AdditionalNetworkInterfaces {
-		project, region, name, err := subnet.ParseSubnetworkRef(override.Subnetwork, p.projectID, p.region)
+		subnetworkRef, err := subnet.CanonicalSubnetworkRef(override.Network, override.Subnetwork, p.projectID, p.region)
 		if err != nil {
 			return nil, err
 		}
-		ifaceNetwork := override.Network
-		if ifaceNetwork == "" {
-			if ifaceNetwork, err = p.networkForSubnetwork(ctx, project, region, name); err != nil {
-				return nil, err
-			}
-		}
 		iface := &compute.NetworkInterface{
-			Network: ifaceNetwork,
-			// The raw spec value may be a bare name, which Instances.Insert rejects.
-			Subnetwork: canonicalSubnetworkRef(project, region, name),
+			Network:    override.Network,
+			Subnetwork: subnetworkRef,
 			NicType:    nic,
 		}
 		applyAccessConfig(iface, disableExternal)
 		ifaces = append(ifaces, iface)
 	}
 	return ifaces, nil
-}
-
-// networkForSubnetwork returns the subnetwork's network, caching the effectively
-// immutable mapping so launch retries do not re-fetch it.
-func (p *DefaultProvider) networkForSubnetwork(ctx context.Context, project, region, name string) (string, error) {
-	ref := canonicalSubnetworkRef(project, region, name)
-	if network, ok := p.subnetworkNetworks.Load(ref); ok {
-		return network.(string), nil
-	}
-	subnet, err := p.computeService.Subnetworks.Get(project, region, name).Context(ctx).Do()
-	if err != nil {
-		return "", fmt.Errorf("fetching subnetwork %q to derive its network: %w", ref, err)
-	}
-	p.subnetworkNetworks.Store(ref, subnet.Network)
-	return subnet.Network, nil
-}
-
-// canonicalSubnetworkRef builds the partial-URL subnetwork reference accepted by
-// Instances.Insert.
-func canonicalSubnetworkRef(project, region, name string) string {
-	return fmt.Sprintf("projects/%s/regions/%s/subnetworks/%s", project, region, name)
 }

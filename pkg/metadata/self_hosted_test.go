@@ -21,7 +21,16 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/api/compute/v1"
 )
+
+func metadataItemsToMap(md *compute.Metadata) map[string]string {
+	values := map[string]string{}
+	for _, item := range md.Items {
+		values[item.Key] = lo.FromPtr(item.Value)
+	}
+	return values
+}
 
 func TestSelfHostedComputeMetadata_RendersOnlyOwnedAndCustomKeys(t *testing.T) {
 	t.Parallel()
@@ -35,18 +44,11 @@ func TestSelfHostedComputeMetadata_RendersOnlyOwnedAndCustomKeys(t *testing.T) {
 
 	result := SelfHostedComputeMetadata("poc0006.k8s.local", startupScript, custom)
 
-	values := map[string]string{}
-	for _, item := range result.Items {
-		values[item.Key] = lo.FromPtr(item.Value)
-	}
 	require.Equal(t, map[string]string{
 		ClusterNameKey:                    "poc0006.k8s.local",
 		StartupScriptKey:                  startupScript,
 		"kops-k8s-io-instance-group-name": "nodes-us-central1-a",
-	}, values)
-	require.NotContains(t, values, KubeEnvKey)
-	require.NotContains(t, values, KubeLabelsKey)
-	require.NotContains(t, values, KubeletConfigKey)
+	}, metadataItemsToMap(result))
 }
 
 func TestSelfHostedComputeMetadata_OmitsStartupScriptWhenEmpty(t *testing.T) {
@@ -58,13 +60,10 @@ func TestSelfHostedComputeMetadata_OmitsStartupScriptWhenEmpty(t *testing.T) {
 		"kops-k8s-io-instance-group-name": "nodes-us-central1-a",
 	})
 
-	values := map[string]string{}
-	for _, item := range result.Items {
-		values[item.Key] = lo.FromPtr(item.Value)
-	}
-	require.NotContains(t, values, StartupScriptKey)
-	require.Equal(t, "poc0006.k8s.local", values[ClusterNameKey])
-	require.Equal(t, "nodes-us-central1-a", values["kops-k8s-io-instance-group-name"])
+	require.Equal(t, map[string]string{
+		ClusterNameKey:                    "poc0006.k8s.local",
+		"kops-k8s-io-instance-group-name": "nodes-us-central1-a",
+	}, metadataItemsToMap(result))
 }
 
 func TestSelfHostedComputeMetadata_ProviderOwnedKeysWinOverCustom(t *testing.T) {
@@ -77,10 +76,8 @@ func TestSelfHostedComputeMetadata_ProviderOwnedKeysWinOverCustom(t *testing.T) 
 		StartupScriptKey: "spoofed",
 	})
 
-	values := map[string]string{}
-	for _, item := range result.Items {
-		values[item.Key] = lo.FromPtr(item.Value)
-	}
-	require.Equal(t, "exact-name", values[ClusterNameKey])
-	require.Equal(t, "#!/bin/bash\n", values[StartupScriptKey])
+	require.Equal(t, map[string]string{
+		ClusterNameKey:   "exact-name",
+		StartupScriptKey: "#!/bin/bash\n",
+	}, metadataItemsToMap(result))
 }

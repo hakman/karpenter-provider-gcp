@@ -69,9 +69,19 @@ func RegionFromLocation(location string) string {
 	return location
 }
 
-var nonAlphanumericRegexp = regexp.MustCompile("[^a-zA-Z0-9]+")
+var (
+	validGCELabelValueRegexp = regexp.MustCompile("^[a-z0-9]([a-z0-9_-]{0,61}[a-z0-9])?$")
+	nonAlphanumericRegexp    = regexp.MustCompile("[^a-zA-Z0-9]+")
+)
 
 func SanitizeGCELabelValue(s string) string {
+	// Preserve already-valid GCE label values verbatim (including GKE cluster names
+	// containing consecutive hyphens such as "prod--east") so existing labels stay
+	// unchanged across upgrades.
+	if validGCELabelValueRegexp.MatchString(s) {
+		return s
+	}
+
 	sanitized := nonAlphanumericRegexp.ReplaceAllString(s, "-")
 
 	sanitized = strings.Trim(sanitized, "-")
@@ -79,7 +89,7 @@ func SanitizeGCELabelValue(s string) string {
 	// Self-hosted cluster names are often FQDNs and can exceed the GCE label value
 	// limit; truncate so Instances.Insert does not reject the label.
 	if len(sanitized) > maxGCELabelValueLength {
-		sanitized = sanitized[:maxGCELabelValueLength]
+		sanitized = strings.TrimRight(sanitized[:maxGCELabelValueLength], "-")
 	}
 	return sanitized
 }

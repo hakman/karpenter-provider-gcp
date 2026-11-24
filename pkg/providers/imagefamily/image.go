@@ -186,7 +186,11 @@ func (p *DefaultProvider) resolveAliasTerm(ctx context.Context, term v1alpha1.Im
 }
 
 func (p *DefaultProvider) resolveIDTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
-	img, err := p.resolveImage(ctx, term.ID)
+	projectID, imageName, err := parseImageSource(term.ID)
+	if err != nil {
+		return nil, fmt.Errorf("resolving image %q: %w", term.ID, err)
+	}
+	img, err := lookupImage(ctx, p.computeService, projectID, imageName)
 	if err != nil {
 		return nil, fmt.Errorf("resolving image %q: %w", term.ID, err)
 	}
@@ -211,7 +215,10 @@ func (p *DefaultProvider) resolveIDTerm(ctx context.Context, term v1alpha1.Image
 	default:
 		return nil, fmt.Errorf("unsupported architecture %q for image %q", img.Architecture, term.ID)
 	}
-	return Images{{SourceImage: term.ID, Requirements: requirements}}, nil
+	// Publish the canonical project-relative path so switching between partial paths and
+	// full Compute URLs for the same image does not trigger false ImageDrift.
+	sourceImage := fmt.Sprintf("projects/%s/global/images/%s", projectID, imageName)
+	return Images{{SourceImage: sourceImage, Requirements: requirements}}, nil
 }
 
 func (p *DefaultProvider) resolveFamilyTerm(ctx context.Context, term v1alpha1.ImageSelectorTerm) (Images, error) {
