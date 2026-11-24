@@ -951,6 +951,10 @@ spec:
                 or secondaryBootMode
               rule: '!has(self.startupScript) || !has(self.disks) || self.disks.all(d,
                 !has(d.secondaryBootImage) && !has(d.secondaryBootMode))'
+            - message: startupScript does not support linuxNodeConfig
+              rule: '!has(self.startupScript) || !has(self.linuxNodeConfig)'
+            - message: startupScript does not support gpuSharingConfig
+              rule: '!has(self.startupScript) || !has(self.gpuSharingConfig)'
           status:
             description: GCENodeClassStatus contains the resolved state of the GCENodeClass
             properties:

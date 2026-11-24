@@ -135,6 +135,24 @@ func TestConfigurationReconcile(t *testing.T) {
 			wantMessage: "spec.autoGPUTaint is not supported in self-hosted mode",
 		},
 		{
+			name: "linuxNodeConfig rejected",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.LinuxNodeConfig = &v1alpha1.LinuxNodeConfig{
+					SwapConfig: &v1alpha1.SwapConfig{Enabled: true},
+				}
+			},
+			wantMessage: "spec.linuxNodeConfig is not supported in self-hosted mode",
+		},
+		{
+			name: "gpuSharingConfig rejected",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.GPUSharingConfig = &v1alpha1.GPUSharingConfig{
+					Strategy: v1alpha1.GPUSharingStrategyTimeSharing, MaxSharedClientsPerGPU: 2,
+				}
+			},
+			wantMessage: "spec.gpuSharingConfig is not supported in self-hosted mode",
+		},
+		{
 			name: "secondaryBootImage rejected",
 			mutate: func(nc *v1alpha1.GCENodeClass) {
 				nc.Spec.Disks = append(nc.Spec.Disks, v1alpha1.Disk{SizeGiB: 50, SecondaryBootImage: "global/images/cache"})

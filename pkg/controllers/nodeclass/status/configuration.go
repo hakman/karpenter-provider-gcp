@@ -69,6 +69,10 @@ func validateSelfHostedNodeClass(nodeClass *v1alpha1.GCENodeClass, projectID, re
 		return "spec.disks must contain a boot disk in self-hosted mode"
 	case nodeClass.Spec.AutoGPUTaint:
 		return "spec.autoGPUTaint is not supported in self-hosted mode"
+	case nodeClass.Spec.LinuxNodeConfig != nil:
+		return "spec.linuxNodeConfig is not supported in self-hosted mode"
+	case nodeClass.Spec.GPUSharingConfig != nil:
+		return "spec.gpuSharingConfig is not supported in self-hosted mode"
 	case hasSecondaryBootDisk(nodeClass.Spec.Disks):
 		return "spec.disks[].secondaryBootImage and secondaryBootMode are not supported in self-hosted mode"
 	case hasUnsupportedSelfHostedKubeletConfig(nodeClass.Spec.KubeletConfiguration):

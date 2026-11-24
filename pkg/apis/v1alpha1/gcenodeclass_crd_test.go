@@ -621,6 +621,20 @@ func TestGCENodeClassCRDStartupScriptValidation(t *testing.T) {
 			message: "startupScript does not support autoGPUTaint",
 		},
 		{
+			name: "linuxNodeConfig rejected",
+			mutate: func(s map[string]any) {
+				s["linuxNodeConfig"] = map[string]any{"swapConfig": map[string]any{"enabled": true}}
+			},
+			message: "startupScript does not support linuxNodeConfig",
+		},
+		{
+			name: "gpuSharingConfig rejected",
+			mutate: func(s map[string]any) {
+				s["gpuSharingConfig"] = map[string]any{"strategy": "TimeSharing", "maxSharedClientsPerGPU": int64(2)}
+			},
+			message: "startupScript does not support gpuSharingConfig",
+		},
+		{
 			name: "secondaryBootImage rejected",
 			mutate: func(s map[string]any) {
 				s["disks"] = append(s["disks"].([]any), map[string]any{"sizeGiB": int64(50), "secondaryBootImage": "global/images/cache"})
