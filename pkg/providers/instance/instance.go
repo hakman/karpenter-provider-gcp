@@ -578,7 +578,7 @@ func (p *DefaultProvider) createWithCapacityType(ctx context.Context, nodeClass 
 		// we could wait for the node to be present in kubernetes api via csr sign up
 		// should be done with watcher, for now implemented as a csr controller
 		log.FromContext(ctx).Info("Created instance", "instanceName", instance.Name, "instanceType", instanceType.Name,
-			"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name, "providerID", instance.Name,
+			"zone", zone, "projectID", p.projectID, "region", p.region, "providerID", instance.Name,
 			"Labels", instance.Labels, "Tags", instance.Tags, "Status", instance.Status)
 
 		return &Instance{
