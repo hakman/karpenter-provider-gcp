@@ -409,6 +409,9 @@ func (p *DefaultProvider) isInstanceExists(ctx context.Context, zone, instanceNa
 		}
 		return nil, false, fmt.Errorf("failed to get instance: %w", err)
 	}
+	if p.clusterName != "" && !metadata.HasValue(instance.Metadata, metadata.ClusterNameKey, p.clusterName) {
+		return nil, false, nil
+	}
 	return instance, true, nil
 }
 
@@ -424,6 +427,9 @@ func (p *DefaultProvider) findInstanceByNodeClaim(ctx context.Context, nodeClaim
 				continue
 			}
 			for _, i := range items.Instances {
+				if p.clusterName != "" && !metadata.HasValue(i.Metadata, metadata.ClusterNameKey, p.clusterName) {
+					continue
+				}
 				instance = i
 				return nil
 			}

@@ -469,7 +469,8 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 			if config.existingInstance {
 				items["zones/us-central1-a"] = compute.InstancesScopedList{Instances: []*compute.Instance{{
 					Name: "karpenter-claim", Zone: "zones/us-central1-a", MachineType: "zones/us-central1-a/machineTypes/n2d-standard-4",
-					Labels: map[string]string{utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount): "4"},
+					Labels:   map[string]string{utils.SanitizeGCELabelValue(v1alpha1.LabelInstanceLocalSsdCount): "4"},
+					Metadata: &compute.Metadata{Items: []*compute.MetadataItems{{Key: metadata.ClusterNameKey, Value: lo.ToPtr("cluster")}}},
 				}}}
 			}
 			reproWriteJSON(w, &compute.InstanceAggregatedList{Items: items})

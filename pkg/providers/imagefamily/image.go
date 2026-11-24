@@ -199,7 +199,8 @@ func (p *DefaultProvider) resolveIDTerm(ctx context.Context, term v1alpha1.Image
 
 	var requirements scheduling.Requirements
 	switch img.Architecture {
-	case OSArchitectureX86:
+	// GCE omits architecture (or reports ARCHITECTURE_UNSPECIFIED) on legacy x86_64 images.
+	case OSArchitectureX86, "", "ARCHITECTURE_UNSPECIFIED":
 		requirements = scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
 		)
@@ -366,12 +367,19 @@ func isImageNotFound(err error) bool {
 
 // parseImageSource parses a GCP image source string
 // Supports formats like:
+// - https://www.googleapis.com/compute/v1/projects/PROJECT_ID/global/images/IMAGE_NAME
 // - projects/PROJECT_ID/global/images/IMAGE_NAME
 // - global/images/IMAGE_NAME (requires project context)
 // - IMAGE_NAME (requires project context)
 func parseImageSource(imageSource string) (projectID, imageName string, err error) {
 	// Remove any leading/trailing whitespace
 	imageSource = strings.TrimSpace(imageSource)
+	for _, prefix := range []string{
+		"https://www.googleapis.com/compute/v1/",
+		"https://compute.googleapis.com/compute/v1/",
+	} {
+		imageSource = strings.TrimPrefix(imageSource, prefix)
+	}
 
 	// Pattern: projects/PROJECT_ID/global/images/IMAGE_NAME
 	projectPattern := regexp.MustCompile(`^projects/([^/]+)/global/images/(.+)$`)

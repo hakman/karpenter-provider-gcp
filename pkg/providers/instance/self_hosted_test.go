@@ -489,12 +489,17 @@ func TestParseSubnetworkRef(t *testing.T) {
 			value:     "projects/other/global/networks/my-vpc",
 			expectErr: true,
 		},
+		{
+			name:      "unqualified subnetworks path rejected",
+			value:     "subnetworks/nodes",
+			expectErr: true,
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			project, region, name, err := parseSubnetworkRef(tc.value, "default-project", "us-central1")
+			project, region, name, err := subnet.ParseSubnetworkRef(tc.value, "default-project", "us-central1")
 			if tc.expectErr {
 				require.Error(t, err)
 				return
@@ -505,6 +510,59 @@ func TestParseSubnetworkRef(t *testing.T) {
 			require.Equal(t, tc.expectedName, name)
 		})
 	}
+}
+
+func TestAdopt_IgnoresForeignClusterInstance(t *testing.T) {
+	t.Parallel()
+
+	clusterNameMeta := func(name string) *compute.Metadata {
+		return &compute.Metadata{Items: []*compute.MetadataItems{
+			{Key: metadata.ClusterNameKey, Value: ptr.To(name)},
+		}}
+	}
+	foreign := &compute.Instance{
+		Name:     "karpenter-claim-1",
+		Zone:     "zones/us-central1-a",
+		Metadata: clusterNameMeta("other.k8s.local"),
+	}
+	owned := &compute.Instance{
+		Name:     "karpenter-claim-1",
+		Zone:     "zones/us-central1-b",
+		Metadata: clusterNameMeta("poc0006.k8s.local"),
+	}
+
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.Contains(r.URL.Path, "/aggregated/instances"):
+			writeJSON(w, &compute.InstanceAggregatedList{
+				Items: map[string]compute.InstancesScopedList{
+					"zones/us-central1-a": {Instances: []*compute.Instance{foreign}},
+					"zones/us-central1-b": {Instances: []*compute.Instance{owned}},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/zones/us-central1-a/instances/"):
+			writeJSON(w, foreign)
+		case strings.Contains(r.URL.Path, "/zones/us-central1-b/instances/"):
+			writeJSON(w, owned)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p.clusterName = "poc0006.k8s.local"
+
+	found, err := p.findInstanceByNodeClaim(context.Background(), &karpv1.NodeClaim{ObjectMeta: metav1.ObjectMeta{Name: "claim-1"}})
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	require.Equal(t, "zones/us-central1-b", found.Zone)
+
+	_, exists, err := p.isInstanceExists(context.Background(), "us-central1-a", "karpenter-claim-1")
+	require.NoError(t, err)
+	require.False(t, exists, "foreign cluster VM in the same zone must not be adopted")
+
+	inst, exists, err := p.isInstanceExists(context.Background(), "us-central1-b", "karpenter-claim-1")
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.Equal(t, "karpenter-claim-1", inst.Name)
 }
 
 // TestBuildInstance_GKEModeUnchangedWithoutOptions proves the gke path still renders

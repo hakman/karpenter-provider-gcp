@@ -448,6 +448,35 @@ func TestList_SelfHostedResolvesIDWithoutVersionOrGKECalls(t *testing.T) {
 	require.Equal(t, OSArchAMD64Requirement, imgs[0].Requirements.Get("kubernetes.io/arch").Any())
 }
 
+func TestList_SelfHostedFullURLAndLegacyUnspecifiedArch(t *testing.T) {
+	catalog := &imageCatalog{
+		pages: [][]*compute.Image{{
+			{Name: "legacy-image", Architecture: "", Status: "READY"},
+			{Name: "unspecified-arch-image", Architecture: "ARCHITECTURE_UNSPECIFIED", Status: "READY"},
+		}},
+	}
+	srv := imageCatalogServer(t, catalog)
+	t.Cleanup(srv.Close)
+
+	p := NewDefaultProvider(buildComputeService(t, srv), nil, &failingGKEProvider{t: t})
+	ctx := options.ToContext(context.Background(), &options.Options{
+		ProvisionMode: options.ProvisionModeSelfHosted,
+	})
+	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{
+			{ID: "https://www.googleapis.com/compute/v1/projects/my-project/global/images/legacy-image"},
+			{ID: "https://compute.googleapis.com/compute/v1/projects/my-project/global/images/unspecified-arch-image"},
+		},
+	}}
+
+	imgs, err := p.List(ctx, nc)
+	require.NoError(t, err)
+	require.Len(t, imgs, 2)
+	for _, img := range imgs {
+		require.Equal(t, OSArchAMD64Requirement, img.Requirements.Get("kubernetes.io/arch").Any())
+	}
+}
+
 func TestDispatch_ChannelCluster_UnspecifiedCluster_ReturnsError(t *testing.T) {
 	stub := &stubGKEProvider{
 		clusterConfig: &containerv1.Cluster{

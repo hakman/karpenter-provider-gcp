@@ -19,11 +19,11 @@ package instance
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"google.golang.org/api/compute/v1"
 
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/subnet"
 )
 
 // This file contains the self-hosted launch path. Node bootstrap is owned by the
@@ -40,7 +40,7 @@ func (p *DefaultProvider) setupSelfHostedNetworkInterfaces(ctx context.Context, 
 	if cfg == nil || cfg.Subnetwork == "" {
 		return nil, fmt.Errorf("GCENodeClass %s: spec.networkConfig.subnetwork is required in self-hosted mode", nodeClass.Name)
 	}
-	project, region, name, err := parseSubnetworkRef(cfg.Subnetwork, p.projectID, p.region)
+	project, region, name, err := subnet.ParseSubnetworkRef(cfg.Subnetwork, p.projectID, p.region)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (p *DefaultProvider) setupSelfHostedNetworkInterfaces(ctx context.Context, 
 
 	ifaces := []*compute.NetworkInterface{primary}
 	for _, override := range cfg.AdditionalNetworkInterfaces {
-		project, region, name, err := parseSubnetworkRef(override.Subnetwork, p.projectID, p.region)
+		project, region, name, err := subnet.ParseSubnetworkRef(override.Subnetwork, p.projectID, p.region)
 		if err != nil {
 			return nil, err
 		}
@@ -108,28 +108,4 @@ func (p *DefaultProvider) networkForSubnetwork(ctx context.Context, project, reg
 // Instances.Insert.
 func canonicalSubnetworkRef(project, region, name string) string {
 	return fmt.Sprintf("projects/%s/regions/%s/subnetworks/%s", project, region, name)
-}
-
-// parseSubnetworkRef accepts a full URL, a partial path with projects/ and/or
-// regions/ segments, or a bare name resolved against the operator's project and region.
-func parseSubnetworkRef(value, defaultProject, defaultRegion string) (project, region, name string, err error) {
-	project, region = defaultProject, defaultRegion
-	if !strings.Contains(value, "/") {
-		return project, region, value, nil
-	}
-	parts := strings.Split(strings.Trim(value, "/"), "/")
-	for i := 0; i < len(parts)-1; i++ {
-		switch parts[i] {
-		case "projects":
-			project = parts[i+1]
-		case "regions":
-			region = parts[i+1]
-		case "subnetworks":
-			name = parts[i+1]
-		}
-	}
-	if name == "" {
-		return "", "", "", fmt.Errorf("invalid subnetwork reference %q: expected a bare name or a path containing subnetworks/<name>", value)
-	}
-	return project, region, name, nil
 }

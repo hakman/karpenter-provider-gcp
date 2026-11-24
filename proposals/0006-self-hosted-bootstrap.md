@@ -216,7 +216,7 @@ Distribution-specific requirements live in the docs, not in the provider. For th
 
 ### IAM Requirements (`self-hosted` mode)
 
-The controller needs only Compute Engine permissions — explicitly no `container.googleapis.com` role: `compute.instances.{create,get,list,delete,setMetadata,setLabels}`, `compute.disks.create`, `compute.subnetworks.{get,use,useExternalIp}`, `compute.zones.list`, `compute.machineTypes.list`, `compute.images.{get,useReadOnly}`, and `iam.serviceAccounts.actAs` on the node service account. The self-hosted guide documents this list; distributions typically do not grant their worker SAs any project role, so a dedicated controller SA is the expected deployment shape.
+The controller needs only Compute Engine permissions — explicitly no `container.googleapis.com` role: `compute.instances.{create,get,list,delete,setMetadata,setLabels}`, `compute.disks.create`, `compute.subnetworks.{get,use,useExternalIp}`, `compute.zones.list`, `compute.regions.get`, `compute.zoneOperations.get`, `compute.machineTypes.list`, `compute.images.{get,useReadOnly}`, `compute.projects.get` (only when `DEFAULT_NODEPOOL_SERVICE_ACCOUNT` is unset), and `iam.serviceAccounts.actAs` on the node service account. The self-hosted guide documents this list; distributions typically do not grant their worker SAs any project role, so a dedicated controller SA is the expected deployment shape.
 
 ---
 
