@@ -34,7 +34,9 @@ func TestConfigurationReconcile(t *testing.T) {
 	t.Parallel()
 
 	selfHostedCtx := options.ToContext(context.Background(), &options.Options{
-		ProvisionMode: options.ProvisionModeSelfHosted,
+		ProvisionMode:   options.ProvisionModeSelfHosted,
+		ProjectID:       "my-project",
+		ClusterLocation: "us-central1",
 	})
 	validSelfHosted := func() *v1alpha1.GCENodeClass {
 		return &v1alpha1.GCENodeClass{
@@ -90,6 +92,27 @@ func TestConfigurationReconcile(t *testing.T) {
 			name:        "missing networkConfig",
 			mutate:      func(nc *v1alpha1.GCENodeClass) { nc.Spec.NetworkConfig = nil },
 			wantMessage: "spec.networkConfig.subnetwork is required in self-hosted mode",
+		},
+		{
+			name:        "malformed subnetwork reference",
+			mutate:      func(nc *v1alpha1.GCENodeClass) { nc.Spec.NetworkConfig.Subnetwork = "subnetworks/nodes" },
+			wantMessage: `invalid subnetwork reference "subnetworks/nodes"`,
+		},
+		{
+			name: "subnetwork in different region",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.NetworkConfig.Subnetwork = "projects/my-project/regions/europe-west4/subnetworks/nodes"
+			},
+			wantMessage: `is in region "europe-west4", expected controller region "us-central1"`,
+		},
+		{
+			name: "additional interface subnetwork in different region",
+			mutate: func(nc *v1alpha1.GCENodeClass) {
+				nc.Spec.NetworkConfig.AdditionalNetworkInterfaces = []v1alpha1.AdditionalNetworkInterface{
+					{Subnetwork: "regions/europe-west4/subnetworks/extra"},
+				}
+			},
+			wantMessage: `is in region "europe-west4", expected controller region "us-central1"`,
 		},
 		{
 			name:        "missing maxPods",
