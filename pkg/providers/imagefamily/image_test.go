@@ -448,10 +448,11 @@ func TestList_SelfHostedResolvesIDWithoutVersionOrGKECalls(t *testing.T) {
 	require.Equal(t, OSArchAMD64Requirement, imgs[0].Requirements.Get("kubernetes.io/arch").Any())
 }
 
-func TestList_SelfHostedFullURLAndLegacyUnspecifiedArch(t *testing.T) {
+func TestList_SelfHostedCanonicalizesFullImageURLs(t *testing.T) {
 	catalog := &imageCatalog{
 		pages: [][]*compute.Image{{
-			{Name: "legacy-image", Architecture: "", Status: "READY"},
+			{Name: "amd64-image", Architecture: OSArchitectureX86, Status: "READY"},
+			{Name: "arm64-image", Architecture: OSArchitectureARM, Status: "READY"},
 			{Name: "unspecified-arch-image", Architecture: "ARCHITECTURE_UNSPECIFIED", Status: "READY"},
 		}},
 	}
@@ -461,20 +462,28 @@ func TestList_SelfHostedFullURLAndLegacyUnspecifiedArch(t *testing.T) {
 	p := NewDefaultProvider(buildComputeService(t, srv), nil, &failingGKEProvider{t: t})
 	nc := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
 		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{
-			{ID: "https://www.googleapis.com/compute/v1/projects/my-project/global/images/legacy-image"},
-			{ID: "https://compute.googleapis.com/compute/v1/projects/my-project/global/images/unspecified-arch-image"},
+			{ID: "https://www.googleapis.com/compute/v1/projects/my-project/global/images/amd64-image"},
+			{ID: "https://compute.googleapis.com/compute/v1/projects/my-project/global/images/arm64-image"},
 		},
 	}}
 
 	imgs, err := p.List(selfHostedImageContext(), nc)
 	require.NoError(t, err)
 	require.Equal(t, []string{
-		"projects/my-project/global/images/legacy-image",
-		"projects/my-project/global/images/unspecified-arch-image",
+		"projects/my-project/global/images/amd64-image",
+		"projects/my-project/global/images/arm64-image",
 	}, imageSources(imgs), "full image URLs must be canonicalized to project-relative paths to prevent false ImageDrift")
-	for _, img := range imgs {
-		require.Equal(t, OSArchAMD64Requirement, img.Requirements.Get("kubernetes.io/arch").Any())
-	}
+	require.Equal(t, OSArchAMD64Requirement, imgs[0].Requirements.Get("kubernetes.io/arch").Any())
+	require.Equal(t, OSArchARM64Requirement, imgs[1].Requirements.Get("kubernetes.io/arch").Any())
+
+	// Images without an explicit GCE architecture must be rejected rather than guessed as amd64.
+	unsetArchNC := &v1alpha1.GCENodeClass{Spec: v1alpha1.GCENodeClassSpec{
+		ImageSelectorTerms: []v1alpha1.ImageSelectorTerm{
+			{ID: "projects/my-project/global/images/unspecified-arch-image"},
+		},
+	}}
+	_, err = p.List(selfHostedImageContext(), unsetArchNC)
+	require.ErrorContains(t, err, `unsupported architecture "ARCHITECTURE_UNSPECIFIED"`)
 }
 
 func TestParseImageSource(t *testing.T) {

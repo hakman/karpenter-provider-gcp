@@ -203,8 +203,7 @@ func (p *DefaultProvider) resolveIDTerm(ctx context.Context, term v1alpha1.Image
 
 	var requirements scheduling.Requirements
 	switch img.Architecture {
-	// GCE omits architecture (or reports ARCHITECTURE_UNSPECIFIED) on legacy x86_64 images.
-	case OSArchitectureX86, "", "ARCHITECTURE_UNSPECIFIED":
+	case OSArchitectureX86:
 		requirements = scheduling.NewRequirements(
 			scheduling.NewRequirement(v1.LabelArchStable, v1.NodeSelectorOpIn, OSArchAMD64Requirement),
 		)
