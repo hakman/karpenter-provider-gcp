@@ -96,6 +96,7 @@ func imagesReadyNodeClass(images ...v1alpha1.Image) *v1alpha1.GCENodeClass {
 		Status:     v1alpha1.GCENodeClassStatus{Images: images},
 	}
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeConfigurationReady)
 	return nodeClass
 }
 

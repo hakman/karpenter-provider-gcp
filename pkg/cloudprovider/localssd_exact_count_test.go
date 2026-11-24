@@ -368,6 +368,7 @@ func runCreateScenario(t *testing.T, config createConfig) createResult { //nolin
 	off := corecloud.Offerings{&corecloud.Offering{Available: true, Price: 1, Requirements: scheduling.NewRequirements(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "us-central1-a"), scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand))}}
 	nclass := &v1alpha1.GCENodeClass{ObjectMeta: metav1.ObjectMeta{Name: "default"}, Spec: v1alpha1.GCENodeClassSpec{LocalSsdMode: config.mode, Disks: []v1alpha1.Disk{{Boot: true, SizeGiB: 100}}, ServiceAccount: "node@test"}, Status: v1alpha1.GCENodeClassStatus{Images: []v1alpha1.Image{{SourceImage: "projects/test/global/images/cos", KubernetesVersion: "1.35.8-gke.1796000"}}}}
 	nclass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
+	nclass.StatusConditions().SetTrue(v1alpha1.ConditionTypeConfigurationReady)
 	if len(config.ssdCounts) == 0 {
 		config.ssdCounts = []int{2, 4}
 	}

@@ -25,6 +25,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/api/compute/v1"
+	containerv1 "google.golang.org/api/container/v1"
+	"google.golang.org/api/googleapi"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
@@ -35,6 +37,7 @@ import (
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/apis/v1alpha1"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/metadata"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
+	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/offerings/unavailableofferings"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/providers/subnet"
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/utils"
 )
@@ -363,6 +366,83 @@ func TestCreateInstanceWithPodRanges_SelfHostedRanksAndFallsBack(t *testing.T) {
 	require.Equal(t, []string{"pods-b", "pods-a"}, attemptedRanges)
 	require.Equal(t, "pods-a", inst.NetworkInterfaces[0].AliasIpRanges[0].SubnetworkRangeName)
 	require.Equal(t, []string{"projects/test-project/regions/us-central1/subnetworks/nodes"}, subnetProv.invalidated)
+}
+
+type selfHostedOnlyGKEProvider struct {
+	t     *testing.T
+	zones []string
+}
+
+func (f *selfHostedOnlyGKEProvider) ResolveClusterZones(context.Context) ([]string, error) {
+	return f.zones, nil
+}
+
+func (f *selfHostedOnlyGKEProvider) GetClusterConfig(context.Context) (*containerv1.Cluster, error) {
+	f.t.Error("GetClusterConfig must not be called in self-hosted mode")
+	return nil, context.Canceled
+}
+
+func (f *selfHostedOnlyGKEProvider) InvalidateClusterConfig() {}
+
+func (f *selfHostedOnlyGKEProvider) GetServerConfig(context.Context) (*containerv1.ServerConfig, error) {
+	f.t.Error("GetServerConfig must not be called in self-hosted mode")
+	return nil, context.Canceled
+}
+
+// TestCreate_SelfHostedWithNilGKEProviders mirrors operator.NewOperator wiring where
+// nodePoolTemplateProvider and bootstrapProvider are nil in self-hosted mode.
+func TestCreate_SelfHostedWithNilGKEProviders(t *testing.T) {
+	t.Parallel()
+
+	var inserted *compute.Instance
+	p := newFakeComputeProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/aggregated/instances"):
+			writeJSON(w, &compute.InstanceAggregatedList{})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/instances/"):
+			w.WriteHeader(http.StatusNotFound)
+			writeJSON(w, &googleapi.Error{Code: http.StatusNotFound, Message: "not found"})
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/projects/test-project/regions/us-central1/subnetworks/nodes"):
+			writeJSON(w, &compute.Subnetwork{Network: "projects/test-project/global/networks/my-vpc"})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/instances"):
+			var inst compute.Instance
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&inst))
+			inserted = &inst
+			writeJSON(w, &compute.Operation{Name: "op-create", Status: "DONE"})
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/operations/"):
+			writeJSON(w, &compute.Operation{Name: "op-create", Status: "DONE"})
+		default:
+			t.Errorf("unexpected Compute API call: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	p.clusterName = "poc0006.k8s.local"
+	p.clusterLocation = "us-central1"
+	p.computeDefaultSA = "123-compute@developer.gserviceaccount.com"
+	p.gkeProvider = &selfHostedOnlyGKEProvider{t: t, zones: []string{"us-central1-a"}}
+	p.instanceTypeProvider = fakeInstanceTypeProvider{}
+	p.subnetProvider = &fakeSelfHostedSubnetProvider{}
+	p.unavailableOfferings = unavailableofferings.NewUnavailableOfferings()
+	p.nodePoolTemplateProvider = nil
+	p.bootstrapProvider = nil
+
+	nodeClaim := onDemandNodeClaim()
+	nodeClaim.Name = "self-hosted-wire"
+	nodeClaim.Labels = map[string]string{karpv1.NodePoolLabelKey: "my-pool"}
+	it := spotAndOnDemandIT("n2-standard-4", 0.05, 0.2)
+	it.Requirements.Add(scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"))
+
+	nodeClass := selfHostedNodeClass()
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeImagesReady)
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeConfigurationReady)
+
+	inst, err := p.Create(selfHostedContext(), nodeClass, nodeClaim, []*cloudprovider.InstanceType{it})
+	require.NoError(t, err)
+	require.NotNil(t, inserted)
+	require.Equal(t, "karpenter-self-hosted-wire", inst.Name)
+	require.Equal(t, selfHostedStartupScript, metadataValue(inserted.Metadata, "startup-script"))
+	require.Equal(t, "poc0006.k8s.local", metadataValue(inserted.Metadata, "cluster-name"))
+	require.Equal(t, "projects/test-project/global/networks/my-vpc", inserted.NetworkInterfaces[0].Network)
 }
 
 func TestParseSubnetworkRef(t *testing.T) {

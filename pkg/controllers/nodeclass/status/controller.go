@@ -45,15 +45,17 @@ type nodeClassStatusReconciler interface {
 type Controller struct {
 	kubeClient client.Client
 
-	image       *Image
-	subnetRange *SubnetRange
+	image         *Image
+	subnetRange   *SubnetRange
+	configuration *Configuration
 }
 
 func NewController(kubeClient client.Client, imageProvider imagefamily.Provider, gkeProvider gke.Provider, subnetProvider subnet.Provider) *Controller {
 	return &Controller{
-		kubeClient:  kubeClient,
-		image:       &Image{imageProvider: imageProvider},
-		subnetRange: &SubnetRange{gkeProvider: gkeProvider, subnetProvider: subnetProvider},
+		kubeClient:    kubeClient,
+		image:         &Image{imageProvider: imageProvider},
+		subnetRange:   &SubnetRange{gkeProvider: gkeProvider, subnetProvider: subnetProvider},
+		configuration: &Configuration{},
 	}
 }
 
@@ -78,6 +80,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeC
 	for _, reconciler := range []nodeClassStatusReconciler{
 		c.image,
 		c.subnetRange,
+		c.configuration,
 	} {
 		res, err := reconciler.Reconcile(ctx, nodeClass)
 		errs = multierr.Append(errs, err)

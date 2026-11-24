@@ -930,7 +930,24 @@ spec:
               rule: '!has(self.startupScript) || self.imageSelectorTerms.all(t, has(t.id))'
             - message: startupScript requires disks to contain a boot disk
               rule: '!has(self.startupScript) || (has(self.disks) && self.disks.exists(d,
-                d.boot))'
+                has(d.boot) && d.boot))'
+            - message: startupScript only supports binpacking kubeletConfiguration
+                fields (maxPods, podsPerCore, systemReserved, kubeReserved, evictionHard)
+              rule: '!has(self.startupScript) || !has(self.kubeletConfiguration) ||
+                (!has(self.kubeletConfiguration.clusterDNS) && !has(self.kubeletConfiguration.evictionSoft)
+                && !has(self.kubeletConfiguration.evictionSoftGracePeriod) && !has(self.kubeletConfiguration.evictionMaxPodGracePeriod)
+                && !has(self.kubeletConfiguration.imageGCHighThresholdPercent) &&
+                !has(self.kubeletConfiguration.imageGCLowThresholdPercent) && !has(self.kubeletConfiguration.cpuCFSQuota)
+                && !has(self.kubeletConfiguration.cpuManagerPolicy) && !has(self.kubeletConfiguration.serializeImagePulls)
+                && !has(self.kubeletConfiguration.maxParallelImagePulls) && !has(self.kubeletConfiguration.failSwapOn)
+                && !has(self.kubeletConfiguration.memorySwap) && !has(self.kubeletConfiguration.shutdownGracePeriod)
+                && !has(self.kubeletConfiguration.shutdownGracePeriodCriticalPods))'
+            - message: startupScript does not support autoGPUTaint
+              rule: '!has(self.startupScript) || !has(self.autoGPUTaint) || !self.autoGPUTaint'
+            - message: startupScript does not support disks with secondaryBootImage
+                or secondaryBootMode
+              rule: '!has(self.startupScript) || !has(self.disks) || self.disks.all(d,
+                !has(d.secondaryBootImage) && !has(d.secondaryBootMode))'
           status:
             description: GCENodeClassStatus contains the resolved state of the GCENodeClass
             properties:
