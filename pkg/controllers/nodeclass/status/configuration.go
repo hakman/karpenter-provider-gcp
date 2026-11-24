@@ -26,21 +26,26 @@ import (
 	"github.com/karpenter-gcp/karpenter-provider-gcp/pkg/operator/options"
 )
 
-const invalidSelfHostedConfigReason = "InvalidSelfHostedConfig"
+const invalidConfigReason = "InvalidConfig"
 
 type Configuration struct{}
 
 // Reconcile validates mode-dependent GCENodeClass configuration invariants that
-// CRD CEL rules cannot enforce (for example, self-hosted NodeClasses without
-// spec.startupScript that rely on image-baked bootstrap).
+// CRD CEL rules cannot enforce (for example, spec.startupScript in GKE mode or
+// self-hosted NodeClasses without spec.startupScript that rely on image-baked bootstrap).
 func (c *Configuration) Reconcile(ctx context.Context, nodeClass *v1alpha1.GCENodeClass) (reconcile.Result, error) {
 	if !options.FromContext(ctx).IsSelfHosted() {
+		if nodeClass.Spec.StartupScript != nil {
+			nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeConfigurationReady, invalidConfigReason,
+				"spec.startupScript is only supported when PROVISION_MODE=self-hosted")
+			return reconcile.Result{}, nil
+		}
 		nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeConfigurationReady)
 		return reconcile.Result{}, nil
 	}
 
 	if msg := validateSelfHostedNodeClass(nodeClass); msg != "" {
-		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeConfigurationReady, invalidSelfHostedConfigReason, msg)
+		nodeClass.StatusConditions().SetFalse(v1alpha1.ConditionTypeConfigurationReady, invalidConfigReason, msg)
 		return reconcile.Result{}, nil
 	}
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeConfigurationReady)

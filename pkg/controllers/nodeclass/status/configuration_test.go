@@ -60,6 +60,19 @@ func TestConfigurationReconcile(t *testing.T) {
 		require.True(t, nc.StatusConditions().IsTrue(v1alpha1.ConditionTypeConfigurationReady))
 	})
 
+	t.Run("gke mode rejects startupScript with ConfigurationReady=False", func(t *testing.T) {
+		t.Parallel()
+		nc := &v1alpha1.GCENodeClass{
+			Spec: v1alpha1.GCENodeClassSpec{StartupScript: ptr.To("#!/bin/bash\necho hi\n")},
+		}
+		_, err := (&Configuration{}).Reconcile(context.Background(), nc)
+		require.NoError(t, err)
+		cond := nc.StatusConditions().Get(v1alpha1.ConditionTypeConfigurationReady)
+		require.True(t, cond.IsFalse())
+		require.Equal(t, invalidConfigReason, cond.Reason)
+		require.Equal(t, "spec.startupScript is only supported when PROVISION_MODE=self-hosted", cond.Message)
+	})
+
 	t.Run("self-hosted valid image-baked nodeClass with binpacking kubelet fields is ready", func(t *testing.T) {
 		t.Parallel()
 		nc := validSelfHosted()
@@ -131,7 +144,7 @@ func TestConfigurationReconcile(t *testing.T) {
 			require.NoError(t, err)
 			cond := nc.StatusConditions().Get(v1alpha1.ConditionTypeConfigurationReady)
 			require.True(t, cond.IsFalse())
-			require.Equal(t, invalidSelfHostedConfigReason, cond.Reason)
+			require.Equal(t, invalidConfigReason, cond.Reason)
 			require.Contains(t, cond.Message, tc.wantMessage)
 		})
 	}
